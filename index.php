@@ -5,6 +5,10 @@ session_start();
 
 $erro = " ";
 
+if (isset($_GET["erro"])) {
+    $erro = "Apenas administradores podem acessar o painel";
+}
+
 if($_SERVER["REQUEST_METHOD"] === "POST"){
     $nome = $_POST["nome"];
     $senha = $_POST["senha"];

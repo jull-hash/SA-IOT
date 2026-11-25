@@ -7,7 +7,7 @@ if (!isset($_SESSION['usuario_id'])) {
     header("Location: index.php");
 }
 if ($_SESSION['usuario_cargo'] !== 'Admin'){
-    header("Location: index.php");
+    header("Location: index.php?erro");
 }
 
 // Quem esta dentro agora 
