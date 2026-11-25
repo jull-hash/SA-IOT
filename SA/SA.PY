@@ -10,11 +10,10 @@ MQTT_PORT = 1883
 
 MQTT_ROOT = "mango/esp32c3/SA"
 
-TOPIC_RFID = f"{MQTT_ROOT}/rfid"
-TOPIC_COMMAND = f"{MQTT_ROOT}/command"
+# Topicos por baia: mango/esp32c3/SA/<baia>/rfid e .../<baia>/command
 TOPIC_ALL = f"{MQTT_ROOT}/#"
 
-# API FastAPI (python -m uvicorn main:app --reload)
+# API FastAPI (python -m uvicorn api:app --reload)
 URL_API = "http://localhost:8000/api/validar-rfid"
 
 CLIENT_ID = "Python-Client-juliana"
@@ -42,13 +41,13 @@ def on_disconnect(client, userdata, disconnect_flags, reason_code, properties):
     print(f"[MQTT] Desconectado: {reason_code}")
 
 
-def consultar_api(rfid):
+def consultar_api(rfid, id_recinto):
     """
     Envia o RFID para a API, que consulta o MySQL, registra
     entrada/saida e devolve os comandos dos servos e do display.
     """
     try:
-        resposta = requests.post(URL_API, json={"uid": rfid}, timeout=3)
+        resposta = requests.post(URL_API, json={"uid": rfid, "id_recinto": id_recinto}, timeout=3)
         if resposta.status_code == 200:
             dados = resposta.json()
             print(f"[API] status: {dados.get('status')}")
@@ -67,7 +66,7 @@ def consultar_api(rfid):
     return 180, 180, "Erro de Sistema", "API Indisponivel", "Bloqueado"
 
 
-def send_command(servo1, servo2, line1, line2, line3):
+def send_command(id_recinto, servo1, servo2, line1, line2, line3):
     if not connected.is_set():
         print("[ERRO] MQTT desconectado!")
         return
@@ -80,13 +79,13 @@ def send_command(servo1, servo2, line1, line2, line3):
     }
     message = json.dumps(payload, ensure_ascii=False)
     result = client.publish(
-        TOPIC_COMMAND,
+        f"{MQTT_ROOT}/{id_recinto}/command",
         message,
         qos=0,
         retain=False
     )
     if result.rc == mqtt.MQTT_ERR_SUCCESS:
-        print("[PYTHON] COMANDO ENVIADO")
+        print(f"[PYTHON] COMANDO ENVIADO para a baia {id_recinto}")
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         print("[ERRO] Falha ao publicar comando!")
@@ -94,6 +93,8 @@ def send_command(servo1, servo2, line1, line2, line3):
 
 def on_message(client, userdata, msg):
     topic = msg.topic
+    # Ex.: mango/esp32c3/SA/1/rfid -> partes[3] = "1", partes[4] = "rfid"
+    partes = topic.split("/")
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -101,19 +102,20 @@ def on_message(client, userdata, msg):
         return
     print("\n" + "=" * 50)
 
-    if topic == TOPIC_RFID:
+    if len(partes) == 5 and partes[3].isdigit() and partes[4] == "rfid":
+        id_recinto = int(partes[3])
         rfid = payload.get("uid")
-        print("[ESP32] RFID")
+        print(f"[ESP32 baia {id_recinto}] RFID")
         print(f"UID: {rfid}")
 
         if not rfid:
             print("[ERRO] Payload sem 'uid'.")
         else:
-            servo1, servo2, line1, line2, line3 = consultar_api(rfid)
-            send_command(servo1, servo2, line1, line2, line3)
+            servo1, servo2, line1, line2, line3 = consultar_api(rfid, id_recinto)
+            send_command(id_recinto, servo1, servo2, line1, line2, line3)
 
-    elif topic == TOPIC_COMMAND:
-        print("[MQTT] COMANDO PUBLICADO")
+    elif len(partes) == 5 and partes[4] == "command":
+        print(f"[MQTT] COMANDO PUBLICADO (baia {partes[3]})")
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         print(f"[MQTT] Topico: {topic}")

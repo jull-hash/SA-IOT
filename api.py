@@ -4,8 +4,6 @@ import mysql.connector
 
 app = FastAPI()
 
-ID_RECINTO = 1  # baia controlada pelo ESP32
-
 # servo1 = porta do funcionario, servo2 = porta do animal
 ABERTO = 90
 FECHADO = 180
@@ -25,6 +23,7 @@ def home():
 
 class RFIDPayload(BaseModel):
     uid: str
+    id_recinto: int = 1  # baia onde a tag foi lida
 
 
 class CommandResponse(BaseModel):
@@ -41,7 +40,7 @@ def negado(l1, l2, l3, status="negado"):
                            line1=l1, line2=l2, line3=l3)
 
 
-def animais_dentro(cursor):
+def animais_dentro(cursor, id_recinto):
     """Quantos animais estao dentro da baia (ultima movimentacao = Entrada)."""
     cursor.execute(
         """
@@ -53,12 +52,12 @@ def animais_dentro(cursor):
               WHERE id_animais = m.id_animais
           )
         """,
-        (ID_RECINTO,)
+        (id_recinto,)
     )
     return cursor.fetchone()["total"]
 
 
-def funcionarios_dentro(cursor):
+def funcionarios_dentro(cursor, id_recinto):
     """Quantos funcionarios estao dentro da baia (ultima movimentacao = Entrada)."""
     cursor.execute(
         """
@@ -70,12 +69,12 @@ def funcionarios_dentro(cursor):
               WHERE id_recinto = m.id_recinto AND id_funcionario = m.id_funcionario
           )
         """,
-        (ID_RECINTO,)
+        (id_recinto,)
     )
     return cursor.fetchone()["total"]
 
 
-def tratar_funcionario(cursor, conexao, funcionario):
+def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
     """Alterna Entrada/Saida do funcionario. Nao entra com animal na baia."""
     cursor.execute(
         """
@@ -83,7 +82,7 @@ def tratar_funcionario(cursor, conexao, funcionario):
         WHERE id_recinto = %s AND id_funcionario = %s
         ORDER BY id_movimentacao DESC LIMIT 1
         """,
-        (ID_RECINTO, funcionario["id_funcionario"])
+        (id_recinto, funcionario["id_funcionario"])
     )
     ultimo = cursor.fetchone()
 
@@ -97,7 +96,7 @@ def tratar_funcionario(cursor, conexao, funcionario):
         )
     else:
         # Entrando: so se nao houver animal na baia
-        if animais_dentro(cursor) > 0:
+        if animais_dentro(cursor, id_recinto) > 0:
             return negado("Acesso Negado!", "Animal na", "baia")
         tipo = "Entrada"
         resposta = CommandResponse(
@@ -109,16 +108,16 @@ def tratar_funcionario(cursor, conexao, funcionario):
 
     cursor.execute(
         "INSERT INTO Movimentacoes_baia (id_recinto, id_funcionario, tipo_mov) VALUES (%s, %s, %s)",
-        (ID_RECINTO, funcionario["id_funcionario"], tipo)
+        (id_recinto, funcionario["id_funcionario"], tipo)
     )
     conexao.commit()
     return resposta
 
 
-def tratar_animal(cursor, conexao, animal):
+def tratar_animal(cursor, conexao, animal, id_recinto):
     """Alterna Entrada/Saida do animal. Entrada so com baia certa e sem funcionario dentro."""
     # 1. A tag precisa pertencer a esta baia
-    if animal["id_recinto"] != ID_RECINTO:
+    if animal["id_recinto"] != id_recinto:
         return negado("Acesso Negado!", "Baia Errada", "Bloqueado")
 
     # 2. Ultima movimentacao desse animal
@@ -136,7 +135,7 @@ def tratar_animal(cursor, conexao, animal):
         # Animal estava dentro: registra saida e FECHA
         cursor.execute(
             "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Saida')",
-            (ID_RECINTO, animal["id_animais"])
+            (id_recinto, animal["id_animais"])
         )
         conexao.commit()
         return CommandResponse(
@@ -151,18 +150,18 @@ def tratar_animal(cursor, conexao, animal):
         WHERE id_recinto = %s AND id_funcionario IS NOT NULL
         ORDER BY id_movimentacao DESC LIMIT 1
         """,
-        (ID_RECINTO,)
+        (id_recinto,)
     )
     ultima = cursor.fetchone()
     if not ultima:
         return negado("Acesso Negado!", "Sem saida", "do tratador")
-    if funcionarios_dentro(cursor) > 0 or ultima["tipo_mov"] != "Saida":
+    if funcionarios_dentro(cursor, id_recinto) > 0 or ultima["tipo_mov"] != "Saida":
         return negado("Acesso Negado!", "Tratador na", "baia")
 
     # 4. Registra entrada do animal e a alimentacao
     cursor.execute(
         "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Entrada')",
-        (ID_RECINTO, animal["id_animais"])
+        (id_recinto, animal["id_animais"])
     )
     cursor.execute(
         "INSERT INTO Historico_alimentacao (id_animais, id_funcionario) VALUES (%s, %s)",
@@ -189,7 +188,7 @@ def validar_rfid(payload: RFIDPayload):
         )
         funcionario = cursor.fetchone()
         if funcionario:
-            resposta = tratar_funcionario(cursor, conexao, funcionario)
+            resposta = tratar_funcionario(cursor, conexao, funcionario, payload.id_recinto)
         else:
             cursor.execute(
                 "SELECT id_animais, nome, id_recinto FROM Animais WHERE cod_tag = %s",
@@ -197,7 +196,7 @@ def validar_rfid(payload: RFIDPayload):
             )
             animal = cursor.fetchone()
             if animal:
-                resposta = tratar_animal(cursor, conexao, animal)
+                resposta = tratar_animal(cursor, conexao, animal, payload.id_recinto)
             else:
                 resposta = negado("Acesso Negado!", "Tag Invalida", "Bloqueado")
 
