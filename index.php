@@ -1,9 +1,28 @@
 <?php
 
+require_once "conexao.php";
 session_start();
 
+$erro = " ";
+
+if (isset($_GET["erro"])) {
+    $erro = "Apenas administradores podem acessar o painel";
+}
+
 if($_SERVER["REQUEST_METHOD"] === "POST"){
-    header("Location: dashboard.php");
+    $nome = $_POST["nome"];
+    $senha = $_POST["senha"];
+    $st = $pdo->prepare("SELECT id_funcionario, nome, senha, cargo FROM funcionario WHERE nome = ? ");
+    $st->execute([$nome]);
+    $user = $st->fetch();
+    if ($user && password_verify($senha ?? ' ', $user["senha"])){
+        $_SESSION['usuario_id'] = $user['id_funcionario'];
+        $_SESSION['usuario_nome'] = $user['nome'];
+        $_SESSION['usuario_cargo'] = $user['cargo'];
+        header('Location: dashboard.php');
+    }else{
+        $erro = "login ou senha incorretos";
+    }
 }
 
 
@@ -17,10 +36,13 @@ if($_SERVER["REQUEST_METHOD"] === "POST"){
 
 </head>
 <body class="bg-gray-100 min-h-screen flex">
-    <form method="POST" method="">
+<div>
+    <?php if ($erro): echo $erro; endif; ?>
+</div>
+<form method="POST">
     <div>
         <label>Login</label>    
-        <input type="text" name="login" placeholder="Ex.:Marcos">
+        <input type="text" name="nome" placeholder="Ex.:Marcos">
     </div>    
 
         <div>
