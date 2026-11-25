@@ -53,18 +53,18 @@ def consultar_api(rfid):
             dados = resposta.json()
             print(f"[API] status: {dados.get('status')}")
             return (
-                dados.get("servo1", 0),
-                dados.get("servo2", 0),
+                dados.get("servo1", 180),
+                dados.get("servo2", 180),
                 dados.get("line1", "Erro"),
                 dados.get("line2", "Resposta API"),
                 dados.get("line3", "Bloqueado")
             )
-        print(f"[ERRO API] Status HTTP {resposta.status_code}")
+        print(f"[ERRO API] Status HTTP {resposta.status_code}: {resposta.text}")
     except Exception as err:
         print(f"[ERRO API] Falha ao comunicar com a API: {err}")
 
-    # Em caso de falha, mantem a trava fechada (RF007)
-    return 0, 0, "Erro de Sistema", "API Indisponivel", "Bloqueado"
+    # Em caso de falha, mantem as travas fechadas (RF007)
+    return 180, 180, "Erro de Sistema", "API Indisponivel", "Bloqueado"
 
 
 def send_command(servo1, servo2, line1, line2, line3):

@@ -4,11 +4,12 @@ import mysql.connector
 
 app = FastAPI()
 
-@app.get("/")
-def home():
-    return {"mensagem": "API funcionando"}
+ID_RECINTO = 1  # baia controlada pelo ESP32
 
-# Configuração de conexão com o banco MySQL
+# servo1 = porta do funcionario, servo2 = porta do animal
+ABERTO = 90
+FECHADO = 180
+
 DB_CONFIG = {
     "host": "localhost",
     "user": "root",
@@ -16,11 +17,16 @@ DB_CONFIG = {
     "database": "zoo"
 }
 
-# Modelo de dados recebido do Python/MQTT
+
+@app.get("/")
+def home():
+    return {"mensagem": "API funcionando"}
+
+
 class RFIDPayload(BaseModel):
     uid: str
 
-# Modelo de dados retornado para o Python/MQTT
+
 class CommandResponse(BaseModel):
     status: str
     servo1: int
@@ -29,90 +35,181 @@ class CommandResponse(BaseModel):
     line2: str
     line3: str
 
+
+def negado(l1, l2, l3, status="negado"):
+    return CommandResponse(status=status, servo1=FECHADO, servo2=FECHADO,
+                           line1=l1, line2=l2, line3=l3)
+
+
+def animais_dentro(cursor):
+    """Quantos animais estao dentro da baia (ultima movimentacao = Entrada)."""
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS total FROM Movimentacoes_baia m
+        WHERE m.id_recinto = %s AND m.id_animais IS NOT NULL
+          AND m.tipo_mov = 'Entrada'
+          AND m.id_movimentacao = (
+              SELECT MAX(id_movimentacao) FROM Movimentacoes_baia
+              WHERE id_animais = m.id_animais
+          )
+        """,
+        (ID_RECINTO,)
+    )
+    return cursor.fetchone()["total"]
+
+
+def funcionarios_dentro(cursor):
+    """Quantos funcionarios estao dentro da baia (ultima movimentacao = Entrada)."""
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS total FROM Movimentacoes_baia m
+        WHERE m.id_recinto = %s AND m.id_funcionario IS NOT NULL
+          AND m.tipo_mov = 'Entrada'
+          AND m.id_movimentacao = (
+              SELECT MAX(id_movimentacao) FROM Movimentacoes_baia
+              WHERE id_recinto = m.id_recinto AND id_funcionario = m.id_funcionario
+          )
+        """,
+        (ID_RECINTO,)
+    )
+    return cursor.fetchone()["total"]
+
+
+def tratar_funcionario(cursor, conexao, funcionario):
+    """Alterna Entrada/Saida do funcionario. Nao entra com animal na baia."""
+    cursor.execute(
+        """
+        SELECT tipo_mov FROM Movimentacoes_baia
+        WHERE id_recinto = %s AND id_funcionario = %s
+        ORDER BY id_movimentacao DESC LIMIT 1
+        """,
+        (ID_RECINTO, funcionario["id_funcionario"])
+    )
+    ultimo = cursor.fetchone()
+
+    if ultimo and ultimo["tipo_mov"] == "Entrada":
+        # Saindo: sempre permitido
+        tipo = "Saida"
+        resposta = CommandResponse(
+            status="sucesso", servo1=FECHADO, servo2=FECHADO,
+            line1="Ate logo", line2=funcionario["nome"],
+            line3="Trava Fechada"
+        )
+    else:
+        # Entrando: so se nao houver animal na baia
+        if animais_dentro(cursor) > 0:
+            return negado("Acesso Negado!", "Animal na", "baia")
+        tipo = "Entrada"
+        resposta = CommandResponse(
+            status="sucesso", servo1=ABERTO, servo2=FECHADO,
+            line1="Acesso Permitido",
+            line2=f"Ola, {funcionario['nome']}",
+            line3="Trava Liberada"
+        )
+
+    cursor.execute(
+        "INSERT INTO Movimentacoes_baia (id_recinto, id_funcionario, tipo_mov) VALUES (%s, %s, %s)",
+        (ID_RECINTO, funcionario["id_funcionario"], tipo)
+    )
+    conexao.commit()
+    return resposta
+
+
+def tratar_animal(cursor, conexao, animal):
+    """Alterna Entrada/Saida do animal. Entrada so com baia certa e sem funcionario dentro."""
+    # 1. A tag precisa pertencer a esta baia
+    if animal["id_recinto"] != ID_RECINTO:
+        return negado("Acesso Negado!", "Baia Errada", "Bloqueado")
+
+    # 2. Ultima movimentacao desse animal
+    cursor.execute(
+        """
+        SELECT tipo_mov FROM Movimentacoes_baia
+        WHERE id_animais = %s
+        ORDER BY id_movimentacao DESC LIMIT 1
+        """,
+        (animal["id_animais"],)
+    )
+    ultimo = cursor.fetchone()
+
+    if ultimo and ultimo["tipo_mov"] == "Entrada":
+        # Animal estava dentro: registra saida e FECHA
+        cursor.execute(
+            "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Saida')",
+            (ID_RECINTO, animal["id_animais"])
+        )
+        conexao.commit()
+        return CommandResponse(
+            status="sucesso", servo1=FECHADO, servo2=FECHADO,
+            line1="Animal saiu", line2=animal["nome"], line3="Trava Fechada"
+        )
+
+    # 3. Entrada: precisa haver confirmacao de saida do funcionario
+    cursor.execute(
+        """
+        SELECT id_funcionario, tipo_mov FROM Movimentacoes_baia
+        WHERE id_recinto = %s AND id_funcionario IS NOT NULL
+        ORDER BY id_movimentacao DESC LIMIT 1
+        """,
+        (ID_RECINTO,)
+    )
+    ultima = cursor.fetchone()
+    if not ultima:
+        return negado("Acesso Negado!", "Sem saida", "do tratador")
+    if funcionarios_dentro(cursor) > 0 or ultima["tipo_mov"] != "Saida":
+        return negado("Acesso Negado!", "Tratador na", "baia")
+
+    # 4. Registra entrada do animal e a alimentacao
+    cursor.execute(
+        "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Entrada')",
+        (ID_RECINTO, animal["id_animais"])
+    )
+    cursor.execute(
+        "INSERT INTO Historico_alimentacao (id_animais, id_funcionario) VALUES (%s, %s)",
+        (animal["id_animais"], ultima["id_funcionario"])
+    )
+    conexao.commit()
+
+    return CommandResponse(
+        status="sucesso", servo1=FECHADO, servo2=ABERTO,
+        line1="Animal OK", line2=animal["nome"], line3="Bom apetite"
+    )
+
+
 @app.post("/api/validar-rfid", response_model=CommandResponse)
 def validar_rfid(payload: RFIDPayload):
     conexao = None
     try:
-        # 1. Conecta ao MySQL
         conexao = mysql.connector.connect(**DB_CONFIG)
         cursor = conexao.cursor(dictionary=True)
 
-        # 2. Consulta o funcionário cadastrado pelo RFID
         cursor.execute(
             "SELECT id_funcionario, nome, cargo FROM Funcionario WHERE rfid = %s",
             (payload.uid,)
         )
         funcionario = cursor.fetchone()
-
         if funcionario:
-            # 3. Busca a ÚLTIMA movimentação desse funcionário no recinto 1
-            cursor.execute(
-                """
-                SELECT tipo_mov FROM Movimentacoes_baia
-                WHERE id_recinto = %s AND id_funcionario = %s
-                ORDER BY id_movimentacao DESC LIMIT 1
-                """,
-                (1, funcionario["id_funcionario"])
-            )
-            ultimo = cursor.fetchone()
-
-            # 4. Decide: se o último foi 'Entrada', agora é saída (fecha)
-            if ultimo and ultimo["tipo_mov"] == "Entrada":
-                tipo = "Saida"
-                resposta = CommandResponse(
-                    status="sucesso",
-                    servo1=180,
-                    servo2=180,
-                    line1="Ate logo",
-                    line2=funcionario["nome"],
-                    line3="Trava Fechada"
-                )
-            else:
-                tipo = "Entrada"
-                resposta = CommandResponse(
-                    status="sucesso",
-                    servo1=90,
-                    servo2=180,
-                    line1="Acesso Permitido",
-                    line2=f"Ola, {funcionario['nome']}",
-                    line3="Trava Liberada"
-                )
-
-            # 5. Registra a movimentação no banco
-            cursor.execute(
-                "INSERT INTO Movimentacoes_baia (id_recinto, id_funcionario, tipo_mov) VALUES (%s, %s, %s)",
-                (1, funcionario["id_funcionario"], tipo)
-            )
-            conexao.commit()
-
-            cursor.close()
-            conexao.close()
-            return resposta
-
+            resposta = tratar_funcionario(cursor, conexao, funcionario)
         else:
-            cursor.close()
-            conexao.close()
-            return CommandResponse(
-                status="negado",
-                servo1=0,
-                servo2=0,
-                line1="Acesso Negado!",
-                line2="Tag Invalida",
-                line3="Bloqueado"
+            cursor.execute(
+                "SELECT id_animais, nome, id_recinto FROM Animais WHERE cod_tag = %s",
+                (payload.uid,)
             )
+            animal = cursor.fetchone()
+            if animal:
+                resposta = tratar_animal(cursor, conexao, animal)
+            else:
+                resposta = negado("Acesso Negado!", "Tag Invalida", "Bloqueado")
+
+        cursor.close()
+        conexao.close()
+        return resposta
 
     except Exception as err:
         print(f"[ERRO API/BD] {err}")
         if conexao and conexao.is_connected():
             conexao.close()
-        return CommandResponse(
-            status="erro",
-            servo1=0,
-            servo2=0,
-            line1="Erro de Sistema",
-            line2="BD Indisponivel",
-            line3="Bloqueado"
-        )
+        return negado("Erro de Sistema", "BD Indisponivel", "Bloqueado", status="erro")
 
 # comando para executar:
-# python -m uvicorn main:app --reload
+# python -m uvicorn api:app --reload
