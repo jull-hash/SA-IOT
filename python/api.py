@@ -56,9 +56,8 @@ def animais_dentro(cursor, id_recinto):
     )
     return cursor.fetchone()["total"]
 
-
+#verifica se o funcionario esta dentro da baia, ou seja, se a ultima movimentacao foi Entrada
 def funcionarios_dentro(cursor, id_recinto):
-    """Quantos funcionarios estao dentro da baia (ultima movimentacao = Entrada)."""
     cursor.execute(
         """
         SELECT COUNT(*) AS total FROM Movimentacoes_baia m
@@ -73,9 +72,8 @@ def funcionarios_dentro(cursor, id_recinto):
     )
     return cursor.fetchone()["total"]
 
-
+#troca a entrada e saida do funcionario, se ele estiver entrando, verifica se nao ha animal dentro da baia
 def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
-    """Alterna Entrada/Saida do funcionario. Nao entra com animal na baia."""
     cursor.execute(
         """
         SELECT tipo_mov FROM Movimentacoes_baia
@@ -86,8 +84,8 @@ def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
     )
     ultimo = cursor.fetchone()
 
+#só entra se não houver animal dentro da baia
     if ultimo and ultimo["tipo_mov"] == "Entrada":
-        # Saindo: sempre permitido
         tipo = "Saida"
         resposta = CommandResponse(
             status="sucesso", servo1=FECHADO, servo2=FECHADO,
@@ -95,7 +93,7 @@ def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
             line3="Trava Fechada"
         )
     else:
-        # Entrando: so se nao houver animal na baia
+        
         if animais_dentro(cursor, id_recinto) > 0:
             return negado("Acesso Negado!", "Animal na", "baia")
         tipo = "Entrada"
@@ -113,14 +111,12 @@ def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
     conexao.commit()
     return resposta
 
-
+#o animal só entra se o funcionário não estiver no recinto e verifica se o recinto é correspodente ao animal
 def tratar_animal(cursor, conexao, animal, id_recinto):
-    """Alterna Entrada/Saida do animal. Entrada so com baia certa e sem funcionario dentro."""
-    # 1. A tag precisa pertencer a esta baia
+    
     if animal["id_recinto"] != id_recinto:
         return negado("Acesso Negado!", "Baia Errada", "Bloqueado")
 
-    # 2. Ultima movimentacao desse animal
     cursor.execute(
         """
         SELECT tipo_mov FROM Movimentacoes_baia
@@ -131,8 +127,8 @@ def tratar_animal(cursor, conexao, animal, id_recinto):
     )
     ultimo = cursor.fetchone()
 
+# Registra a saida do animal se a ultima movimentacao foi entrada
     if ultimo and ultimo["tipo_mov"] == "Entrada":
-        # Animal estava dentro: registra saida e FECHA
         cursor.execute(
             "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Saida')",
             (id_recinto, animal["id_animais"])
@@ -143,7 +139,7 @@ def tratar_animal(cursor, conexao, animal, id_recinto):
             line1="Animal saiu", line2=animal["nome"], line3="Trava Fechada"
         )
 
-    # 3. Entrada: precisa haver confirmacao de saida do funcionario
+# se o funcionário estiver dentro do recinto, o animal não pode entrar
     cursor.execute(
         """
         SELECT id_funcionario, tipo_mov FROM Movimentacoes_baia
@@ -158,7 +154,7 @@ def tratar_animal(cursor, conexao, animal, id_recinto):
     if funcionarios_dentro(cursor, id_recinto) > 0 or ultima["tipo_mov"] != "Saida":
         return negado("Acesso Negado!", "Tratador na", "baia")
 
-    # 4. Registra entrada do animal e a alimentacao
+#registrando entrada e histpórico de alimentação do animal
     cursor.execute(
         "INSERT INTO Movimentacoes_baia (id_recinto, id_animais, tipo_mov) VALUES (%s, %s, 'Entrada')",
         (id_recinto, animal["id_animais"])

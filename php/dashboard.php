@@ -2,10 +2,10 @@
 session_start();
 require_once "conexao.php";
 
-// Quando o login gravar a sessao, descomente para proteger a pagina:
+// Quando o login gravar a sessao:
 // if (!isset($_SESSION['id_funcionario'])) { header("Location: index.php"); exit; }
 
-// Quem esta dentro agora (ultima movimentacao de cada funcionario/animal = Entrada)
+// Quem esta dentro agora 
 $dentro = $pdo->query("
     SELECT r.nome_identificacao AS baia,
            COALESCE(f.nome, a.nome) AS nome,
@@ -117,7 +117,7 @@ function dt($v) { return date('d/m/Y H:i:s', strtotime($v)); }
             </table>
         </section>
 
-        <!-- Ultimas movimentacoes -->
+        <!-- Últimas movimentações -->
         <section class="bg-white rounded-lg shadow p-5">
             <h2 class="font-semibold text-gray-800 mb-3">Últimas movimentações</h2>
             <table class="w-full text-sm">

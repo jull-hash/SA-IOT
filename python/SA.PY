@@ -10,7 +10,7 @@ MQTT_PORT = 1883
 
 MQTT_ROOT = "mango/esp32c3/SA"
 
-# Topicos por baia: mango/esp32c3/SA/<baia>/rfid e .../<baia>/command
+
 TOPIC_ALL = f"{MQTT_ROOT}/#"
 
 # API FastAPI (python -m uvicorn api:app --reload)
@@ -40,12 +40,9 @@ def on_disconnect(client, userdata, disconnect_flags, reason_code, properties):
     connected.clear()
     print(f"[MQTT] Desconectado: {reason_code}")
 
-
+#aqui é enviado o rfid para a api, que consulta o mysql. registra a mov e devolve os comandos dos servos e do display
 def consultar_api(rfid, id_recinto):
-    """
-    Envia o RFID para a API, que consulta o MySQL, registra
-    entrada/saida e devolve os comandos dos servos e do display.
-    """
+    
     try:
         resposta = requests.post(URL_API, json={"uid": rfid, "id_recinto": id_recinto}, timeout=3)
         if resposta.status_code == 200:
@@ -62,7 +59,7 @@ def consultar_api(rfid, id_recinto):
     except Exception as err:
         print(f"[ERRO API] Falha ao comunicar com a API: {err}")
 
-    # Em caso de falha, mantem as travas fechadas (RF007)
+  #se der erro, ambas as travas fecham
     return 180, 180, "Erro de Sistema", "API Indisponivel", "Bloqueado"
 
 
