@@ -5,6 +5,7 @@ import mysql.connector
 app = FastAPI()
 
 # servo1 = porta do funcionario, servo2 = porta do animal
+# 180 = fechado, 90 = aberto
 ABERTO = 90
 FECHADO = 180
 
@@ -12,8 +13,8 @@ DB_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "",
-    "database": "zoo"
-}
+    "database": "ZOOFEEDER"
+    }
 
 
 @app.get("/")
@@ -23,7 +24,7 @@ def home():
 
 class RFIDPayload(BaseModel):
     uid: str
-    id_recinto: int = 1  # baia onde a tag foi lida
+    id_recinto: int = 1  #identifica o recinto
 
 
 class CommandResponse(BaseModel):
@@ -41,7 +42,6 @@ def negado(l1, l2, l3, status="negado"):
 
 
 def animais_dentro(cursor, id_recinto):
-    """Quantos animais estao dentro da baia (ultima movimentacao = Entrada)."""
     cursor.execute(
         """
         SELECT COUNT(*) AS total FROM Movimentacoes_baia m
