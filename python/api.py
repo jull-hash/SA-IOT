@@ -40,12 +40,13 @@ def negado(l1, l2, l3, status="negado"):
     return CommandResponse(status=status, servo1=FECHADO, servo2=FECHADO,
                            line1=l1, line2=l2, line3=l3)
 
-
+#só considera mov de animais, igual o de funcionários (Is not null)
+#busca só as movs mais recentes do funcionário (Select max)
 def animais_dentro(cursor, id_recinto):
     cursor.execute(
         """
         SELECT COUNT(*) AS total FROM Movimentacoes_baia m
-        WHERE m.id_recinto = %s AND m.id_animais IS NOT NULL
+        WHERE m.id_recinto = %s AND m.id_animais IS NOT NULL 
           AND m.tipo_mov = 'Entrada'
           AND m.id_movimentacao = (
               SELECT MAX(id_movimentacao) FROM Movimentacoes_baia
@@ -72,7 +73,8 @@ def funcionarios_dentro(cursor, id_recinto):
     )
     return cursor.fetchone()["total"]
 
-#troca a entrada e saida do funcionario, se ele estiver entrando, verifica se nao ha animal dentro da baia
+
+#troca entre entrada e saida do funcionario, se ele estiver entrando, verifica se nao ha animal dentro da baia
 def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
     cursor.execute(
         """
@@ -93,7 +95,19 @@ def tratar_funcionario(cursor, conexao, funcionario, id_recinto):
             line3="Trava Fechada"
         )
     else:
-        
+        # funcionario precisa ter saido de qualquer outra baia antes de entrar
+        cursor.execute(
+            """
+            SELECT id_recinto, tipo_mov FROM Movimentacoes_baia
+            WHERE id_funcionario = %s
+            ORDER BY id_movimentacao DESC LIMIT 1
+            """,
+            (funcionario["id_funcionario"],)
+        )
+        atual = cursor.fetchone()
+        if atual and atual["tipo_mov"] == "Entrada" and atual["id_recinto"] != id_recinto:
+            return negado("Acesso Negado!", "Saia da baia", str(atual["id_recinto"]))
+
         if animais_dentro(cursor, id_recinto) > 0:
             return negado("Acesso Negado!", "Animal na", "baia")
         tipo = "Entrada"
@@ -195,6 +209,16 @@ def validar_rfid(payload: RFIDPayload):
                 resposta = tratar_animal(cursor, conexao, animal, payload.id_recinto)
             else:
                 resposta = negado("Acesso Negado!", "Tag Invalida", "Bloqueado")
+            try:
+                    cursor.execute(
+                        "INSERT INTO Tag_lida (uid) VALUES (%s) "
+                        "ON DUPLICATE KEY UPDATE ultima_leitura = NOW()",
+                        (payload.uid,)
+                    )
+                    conexao.commit()
+            except Exception as e:
+                print(f"[AVISO] Nao foi possivel salvar a tag lida: {e}")
+                Resposta = negado("Acesso Negado!", "Tag Invalida", "Bloqueado")    
 
         cursor.close()
         conexao.close()
