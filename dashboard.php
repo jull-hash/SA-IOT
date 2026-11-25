@@ -3,7 +3,12 @@ session_start();
 require_once "conexao.php";
 
 // Quando o login gravar a sessao:
-// if (!isset($_SESSION['id_funcionario'])) { header("Location: index.php"); exit; }
+if (!isset($_SESSION['usuario_id'])) { 
+    header("Location: index.php");
+}
+if ($_SESSION['usuario_cargo'] !== 'Admin'){
+    header("Location: index.php");
+}
 
 // Quem esta dentro agora 
 $dentro = $pdo->query("
@@ -69,6 +74,8 @@ function dt($v) { return date('d/m/Y H:i:s', strtotime($v)); }
     <header class="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
         <h1 class="font-bold text-lg">Painel administrativo</h1>
         <nav class="flex gap-4 text-sm">
+            <a href="animal.php" class="font-semibold">Cadastrar animal</a>
+            <a href="funcionario.php" class="font-semibold">Cadastrar funcionários</a>
             <a href="dashboard.php" class="font-semibold">Dashboard</a>
             <a href="sair.php" class="text-gray-300 hover:text-white">Sair</a>
         </nav>
