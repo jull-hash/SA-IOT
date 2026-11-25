@@ -4,20 +4,21 @@ import threading
 import paho.mqtt.client as mqtt
 
 
-FUNCIONARIOS_AUTORIZADOS = { "01020304": {"nome": "Jailine", "cargo": "Tratador"},
-"A1B2C3D4": {"nome": "Julio", "cargo": "Tratador"},
-"12345678": {"nome": "Juliana", "cargo": "Veterinária"} }
 
 
 MQTT_SERVER = "broker.mqtt.cool"
 MQTT_PORT = 1883
 
+FUNCIONARIOS_AUTORIZADOS = { "01020304": {"nome": "Jailine", "cargo": "Tratador"},
+"A1B2C3D4": {"nome": "Julio", "cargo": "Tratador"},
+"12345678": {"nome": "Juliana", "cargo": "Veterinária"} }
 
 MQTT_ROOT = "mango/esp32c3/SA"
 
 TOPIC_RFID = f"{MQTT_ROOT}/rfid"
 TOPIC_COMMAND = f"{MQTT_ROOT}/command"
 TOPIC_ALL = f"{MQTT_ROOT}/#"
+ 
 
 CLIENT_ID = "Python-Client-juliana"
 
