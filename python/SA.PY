@@ -49,8 +49,8 @@ def consultar_api(rfid, id_recinto):
             dados = resposta.json()
             print(f"[API] status: {dados.get('status')}")
             return (
-                dados.get("servo1", 180),
-                dados.get("servo2", 180),
+                dados.get("servo1", 0),
+                dados.get("servo2", 0),
                 dados.get("line1", "Erro"),
                 dados.get("line2", "Resposta API"),
                 dados.get("line3", "Bloqueado")
@@ -60,7 +60,7 @@ def consultar_api(rfid, id_recinto):
         print(f"[ERRO API] Falha ao comunicar com a API: {err}")
 
   #se der erro, ambas as travas fecham
-    return 180, 180, "Erro de Sistema", "API Indisponivel", "Bloqueado"
+    return 0, 0, "Erro de Sistema", "API Indisponivel", "Bloqueado"
 
 
 def send_command(id_recinto, servo1, servo2, line1, line2, line3):
